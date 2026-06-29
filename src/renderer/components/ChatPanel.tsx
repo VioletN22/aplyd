@@ -31,7 +31,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ applicationId, company, jo
   useEffect(() => {
     (window as any).electronAPI.chat
       .getMessages(applicationId)
-      .then((msgs: ChatMessage[]) => setMessages(msgs))
+      .then((msgs: ChatMessage[] | null) => setMessages(msgs ?? []))
       .catch(() => {});
   }, [applicationId]);
 
@@ -59,10 +59,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ applicationId, company, jo
     try {
       const result = await (window as any).electronAPI.chat.send(applicationId, message);
       if (!result.success) throw new Error(result.error || 'Chat failed');
+      const appended = [result.userMessage, result.assistantMessage].filter(
+        (m): m is ChatMessage => !!m
+      );
       setMessages((prev) => [
         ...prev.filter((m) => m.id !== tempUser.id),
-        result.userMessage,
-        result.assistantMessage,
+        ...appended,
       ]);
     } catch (err) {
       setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
@@ -122,7 +124,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ applicationId, company, jo
           </div>
         )}
 
-        {messages.map((m) => (
+        {messages.filter((m) => !!m).map((m) => (
           <div
             key={m.id}
             style={{

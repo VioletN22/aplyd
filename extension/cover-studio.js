@@ -39,7 +39,14 @@
     const s = document.createElement('span');
     s.className = 'aplyd-cl-sent' + (cls ? ' ' + cls : '');
     s.dataset.text = text;
-    s.innerHTML = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br/>') + ' ';
+    // Build with real DOM nodes (no innerHTML): each newline becomes a real <br>.
+    // This is XSS-safe regardless of what the AI/page text contains.
+    const parts = String(text).split('\n');
+    parts.forEach((part, i) => {
+      if (i > 0) s.appendChild(document.createElement('br'));
+      s.appendChild(document.createTextNode(part));
+    });
+    s.appendChild(document.createTextNode(' '));
     return s;
   }
   // build paragraph blocks from a sentence list, reusing provided spans where given
@@ -214,7 +221,17 @@
       generate();
     });
   }
-  function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  // Full HTML escaper - safe in BOTH text and quoted-attribute contexts (escapes
+  // &, <, >, " and '). Used for every interpolated page/profile/AI string (e.g.
+  // company/role in the header, and AI-generated questions in data-q="...").
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
   window.Aplyd.openCoverStudio = openCoverStudio;
 })();

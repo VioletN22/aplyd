@@ -72,14 +72,16 @@ function computeLayout(data: FlowData, W: number, H: number, mini: boolean) {
   const dropLead = mini ? 38 : 78;
   const dropZoneTop = spineY + SPINE_MAX + (mini ? 24 : 58);
 
-  const nodeById = new Map<string, FlowNode>(data.nodes.map((n) => [n.id, n]));
+  const nodes = data.nodes ?? [];
+  const links = data.links ?? [];
+  const nodeById = new Map<string, FlowNode>(nodes.map((n) => [n.id, n]));
   const out = new Map<string, FlowData['links']>();
-  for (const l of data.links) {
+  for (const l of links) {
     if (!out.has(l.source)) out.set(l.source, []);
     out.get(l.source)!.push(l);
   }
 
-  const spine = data.nodes
+  const spine = nodes
     .filter((n) => n.kind === 'active' || n.kind === 'offer')
     .sort((a, b) => rank(a.id) - rank(b.id));
   const total = Math.max(1, ...spine.map((n) => n.count));

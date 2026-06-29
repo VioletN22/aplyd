@@ -33,13 +33,13 @@ export const SetupPage: React.FC = () => {
   const [letters, setLetters] = useState<CoverLetter[]>([]);
 
   const reload = async () => {
-    setAnswers(await api().getAnswerBank());
-    setDocs(await api().getDocuments());
-    setNotes(await api().getVoiceNotes());
-    setLinks(await api().getPortfolioLinks());
-    setLetters(await api().getCoverLetters());
+    setAnswers((await api().getAnswerBank()) ?? []);
+    setDocs((await api().getDocuments()) ?? []);
+    setNotes((await api().getVoiceNotes()) ?? []);
+    setLinks((await api().getPortfolioLinks()) ?? []);
+    setLetters((await api().getCoverLetters()) ?? []);
   };
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { reload().catch(() => {}); }, []);
 
   const core = { answers, docs, notes, links, letters, reload };
   return <SetupView core={core} />;
@@ -93,7 +93,7 @@ type CoreData = { answers: AnswerBankEntry[]; docs: LockerDocument[]; notes: Voi
 const ResumesPanel: React.FC<{ docs: LockerDocument[]; reload: () => void }> = ({ docs, reload }) => {
   const resumes = docs.filter((d) => d.tags.includes('resume'));
   const [focus, setFocus] = useState<Record<string, string>>({});
-  useEffect(() => { window.electronAPI.setup.getResumeFocus().then(setFocus); }, [docs.length]);
+  useEffect(() => { window.electronAPI.setup.getResumeFocus().then((f: Record<string, string> | null) => setFocus(f ?? {})); }, [docs.length]);
   const add = async () => {
     const fp = await window.electronAPI.setup.pickDocument();
     if (!fp) return;
@@ -137,7 +137,7 @@ const ProfileSection: React.FC = () => {
   const [profile, setProfile] = useState<Record<string, string>>({});
   const [seeding, setSeeding] = useState(false);
   const [saved, setSaved] = useState(false);
-  const load = async () => setProfile(await window.electronAPI.profile.get());
+  const load = async () => setProfile((await window.electronAPI.profile.get()) ?? {});
   useEffect(() => { load(); }, []);
   const setField = (k: string, v: string) => setProfile((p) => ({ ...p, [k]: v }));
   const save = async () => { await window.electronAPI.profile.set(profile); setSaved(true); window.setTimeout(() => setSaved(false), 1400); };
@@ -147,7 +147,7 @@ const ProfileSection: React.FC = () => {
     setSeeding(true);
     await window.electronAPI.profile.set(profile);
     const merged = await window.electronAPI.profile.seed();
-    setProfile(merged); setSeeding(false);
+    setProfile(merged ?? {}); setSeeding(false);
   };
   const keys = Array.from(new Set([...PROFILE_FIELDS, ...Object.keys(profile)]));
   return (

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, session } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -72,9 +72,9 @@ import {
   setSetting,
 } from './database';
 import { coverLetterPrompt, refineCoverLetterPrompt, parseCoverLetter, portfolioSnapshot, companyResearch, profileSeedPrompt, parseProfileSeed } from './prompts';
-import { extractJobListing, generateGuidance, runClaudeCLI, chatAboutApplication } from './claude';
+import { extractJobListing, runClaudeCLI, chatAboutApplication, killClaudeProcesses } from './claude';
 import { getFlowData } from './flow';
-import { getLicenseStatus, activateLicense, deactivateLicense } from './license';
+import { startBridge, stopBridge, BRIDGE_PORT } from './bridge';
 import { JobApplication, Workflow, ExtractedJobData } from '../shared/types';
 
 let mainWindow: BrowserWindow | null = null;
@@ -104,6 +104,21 @@ const APP_URL = isDev
   ? 'http://localhost:5173'
   : `file://${path.join(__dirname, '../renderer/index.html')}`;
 
+// Create an application row from a LinkedIn Easy Apply submission (via the bridge).
+function logApplication(company: string, jobTitle: string, jobUrl: string): void {
+  try {
+    let workflow = getDefaultWorkflowForCompany(company);
+    if (!workflow) workflow = createWorkflow(company, `${company} Default Workflow`, ['applied', 'phone_screen', 'interview', 'offer'], true);
+    const application = createApplication({
+      company, job_title: jobTitle || 'Role', location: '', job_url: jobUrl || '', job_source: 'LinkedIn',
+      salary_min: null, salary_max: null, equity: null, benefits: null,
+      job_description: '', key_responsibilities: '', required_skills: '', nice_to_have_skills: '',
+      team_info: null, hiring_timeline: null, application_deadline: null,
+    } as ExtractedJobData, workflow.id);
+    createStageHistory(application.id, 'applied', 'Logged from LinkedIn Easy Apply');
+  } catch (e) { log('[bridge] logApplication err ' + String(e)); }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -117,6 +132,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
     },
     title: 'aplyd',
   });
@@ -126,6 +143,17 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // Never let the privileged window navigate away from the app itself. The app
+  // is local-only; any attempt to navigate to a remote origin (which would inherit
+  // the preload bridge) is blocked and opened in the real browser instead.
+  const isAppUrl = (url: string) => url === APP_URL || url.startsWith('http://localhost:5173') || url.startsWith('file://');
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (!isAppUrl(url)) { e.preventDefault(); if (/^https?:\/\//.test(url)) shell.openExternal(url); }
+  });
+  mainWindow.webContents.on('will-redirect', (e, url) => {
+    if (!isAppUrl(url)) e.preventDefault();
   });
 
   mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
@@ -209,14 +237,42 @@ app.whenReady().then(() => {
   log('[whenReady] uptime=' + process.uptime().toFixed(3) + ' isPackaged=' + app.isPackaged);
   if (process.env.APLYD_SMOKETEST === '1') { runSmokeTest(); return; }
   isStarting = true;
+  // Content-Security-Policy for the packaged app (renderer loads from file://).
+  // Only applied in production so Vite's dev server / HMR is untouched. The renderer
+  // makes no network requests of its own (everything goes through IPC), so this is
+  // strict: scripts/styles/connections are limited to the app's own origin.
+  if (!isDev) {
+    session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+      cb({ responseHeaders: { ...details.responseHeaders,
+        'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'"] } });
+    });
+  }
   // Create the window FIRST - DB init is deferred until after the splash is
   // visible (see the show handler above), keeping cold start minimal.
   createWindow();
+  // Local bridge for the Chrome extension (LinkedIn Easy Apply). Localhost-only,
+  // refuses website origins. The extension's service worker is the only caller.
+  startBridge({
+    onApply: logApplication,
+    saveCover: async ({ company, role, body }) => {
+      const file = await writeCoverPdf(company, role, body);
+      try { saveCoverLetter({ company, role, body, isFinal: true, jobUrl: null }); } catch { /* vault best-effort */ }
+      return { path: file };
+    },
+  });
+  log('[bridge] listening on 127.0.0.1:' + BRIDGE_PORT);
 });
 
 app.on('window-all-closed', () => {
   closeDatabase();
   if (process.platform !== 'darwin') app.quit();
+});
+
+// On quit, stop the extension bridge and kill any in-flight `claude` subprocesses
+// so nothing is left orphaned if the user quits mid-generation.
+app.on('before-quit', () => {
+  try { killClaudeProcesses(); } catch { /* ignore */ }
+  try { stopBridge(); } catch { /* ignore */ }
 });
 
 app.on('activate', () => {
@@ -236,35 +292,6 @@ app.on('activate', () => {
   }
 });
 
-// License (purpl hq) IPC Handlers
-
-// This app's id for entitlement checks. inkd uses 'inkd' in its own copy.
-const APP_ID = 'aplyd';
-
-ipcMain.handle('license:status', async () => {
-  try {
-    return getLicenseStatus(APP_ID);
-  } catch (error) {
-    return { licensed: false, entitlements: [] };
-  }
-});
-
-ipcMain.handle('license:activate', async (_event, key: string) => {
-  try {
-    return activateLicense(key);
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-});
-
-ipcMain.handle('license:deactivate', async () => {
-  try {
-    deactivateLicense();
-    return { ok: true };
-  } catch {
-    return { ok: false };
-  }
-});
 
 // Flow (Sankey) IPC Handler
 
@@ -423,30 +450,35 @@ ipcMain.handle('db:deleteWorkflow', async (_event, id: string) => {
 /**
  * Open file dialog and return file content
  */
+// Paths the user has explicitly chosen via a native dialog this session. We only
+// ever read or store a path the user actually picked, so a compromised renderer
+// can't hand us an arbitrary absolute path (e.g. ~/.ssh/id_rsa) to read or copy.
+const pickedPaths = new Set<string>();
+
 ipcMain.handle('file:selectFile', async (_event) => {
   try {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openFile'],
       filters: [
+        { name: 'Job listing', extensions: ['txt', 'md', 'pdf'] },
         { name: 'All Files', extensions: ['*'] },
-        { name: 'PDF Files', extensions: ['pdf'] },
-        { name: 'Text Files', extensions: ['txt', 'md'] },
-        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif'] },
       ],
     });
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-
+    if (result.canceled || result.filePaths.length === 0) return null;
     const filePath = result.filePaths[0];
+    pickedPaths.add(filePath);
     const fs = require('fs');
-    const content = fs.readFileSync(filePath, 'utf-8');
-
-    return {
-      filePath,
-      content,
-    };
+    let content = '';
+    if (/\.pdf$/i.test(filePath)) {
+      try { const pdfParse = require('pdf-parse'); const data = await pdfParse(fs.readFileSync(filePath)); content = (data.text || '').trim(); }
+      catch { content = ''; }
+    } else if (/\.(txt|md|markdown)$/i.test(filePath)) {
+      content = fs.readFileSync(filePath, 'utf-8');
+    } else {
+      // images / unknown binary can't be read as a job listing
+      return { filePath, content: '', note: "That file type can't be read as text. Paste the job text instead." };
+    }
+    return { filePath, content };
   } catch (error) {
     throw new Error(`Failed to select file: ${error}`);
   }
@@ -482,10 +514,15 @@ ipcMain.handle('setup:pickDocument', async () => {
     ],
   });
   if (result.canceled || result.filePaths.length === 0) return null;
-  return result.filePaths[0]; // path only - never read PDF bytes as utf-8
+  const picked = result.filePaths[0];
+  pickedPaths.add(picked);
+  return picked; // path only - never read PDF bytes as utf-8
 });
-ipcMain.handle('setup:addDocument', async (_e, label: string, filePath: string, tags: string[], isDefault: boolean) =>
-  addDocument(label, filePath, tags, isDefault));
+ipcMain.handle('setup:addDocument', async (_e, label: string, filePath: string, tags: string[], isDefault: boolean) => {
+  // only accept a path the user actually picked via the dialog this session
+  if (!pickedPaths.has(filePath)) throw new Error('Document must be chosen with the file picker.');
+  return addDocument(label, filePath, tags, isDefault);
+});
 ipcMain.handle('setup:deleteDocument', async (_e, id: string) => { deleteDocument(id); return { ok: true }; });
 ipcMain.handle('setup:setDocumentDefault', async (_e, id: string) => { setDocumentDefault(id); return { ok: true }; });
 ipcMain.handle('setup:getResumeFocus', async () => getResumeFocus());
@@ -540,7 +577,9 @@ async function writeCoverPdf(company: string, role: string, body: string): Promi
   const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
   try {
     await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-    const pdf = await win.webContents.printToPDF({ printBackground: true, marginsType: 0 } as any);
+    // NOTE: `marginsType: 0` is the Electron 18 API; on Electron 21+ this becomes
+    // `margins: { marginType: 'none' }`. Update together with any Electron upgrade.
+    const pdf = await win.webContents.printToPDF({ printBackground: true, margins: { marginType: 'none' } });
     fs.writeFileSync(file, pdf);
   } finally { win.destroy(); }
   return file;
@@ -609,79 +648,6 @@ ipcMain.handle('coverletter:refine', async (_e, opts: { applicationId: string; c
 ipcMain.handle('coverletter:saveForApp', async (_e, opts: { applicationId: string; company: string; role: string; jobUrl?: string; body: string }) =>
   saveCoverLetterForApplication(opts.applicationId, { company: opts.company, role: opts.role, jobUrl: opts.jobUrl ?? null, body: opts.body }));
 
-// Attachment Operations IPC Handlers
-
-/**
- * Add an attachment to an application
- */
-ipcMain.handle('attachment:add', async (_event, applicationId: string, filePath: string) => {
-  try {
-    const fs = require('fs');
-    const path = require('path');
-
-    // Get file info
-    const fileName = path.basename(filePath);
-    const fileType = path.extname(filePath).substring(1) || 'unknown';
-
-    // Copy file to app data directory
-    const appPath = app.getPath('userData');
-    const attachmentsDir = path.join(appPath, 'attachments', applicationId);
-
-    // Ensure directory exists
-    if (!fs.existsSync(attachmentsDir)) {
-      fs.mkdirSync(attachmentsDir, { recursive: true });
-    }
-
-    const destPath = path.join(attachmentsDir, `${Date.now()}-${fileName}`);
-    fs.copyFileSync(filePath, destPath);
-
-    // Create attachment record in database
-    const attachment = createAttachment(applicationId, fileName, fileType, destPath);
-
-    return {
-      success: true,
-      attachment,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-});
-
-/**
- * Get attachments for an application
- */
-ipcMain.handle('attachment:getAll', async (_event, applicationId: string) => {
-  try {
-    const attachments = getAttachmentsForApplication(applicationId);
-    return {
-      success: true,
-      attachments,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-});
-
-/**
- * Delete an attachment
- */
-ipcMain.handle('attachment:delete', async (_event, attachmentId: string) => {
-  try {
-    deleteAttachment(attachmentId);
-    return { success: true };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-});
 
 // Claude Operations IPC Handler
 

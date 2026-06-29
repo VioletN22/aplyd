@@ -32,7 +32,9 @@
   mo.observe(document.body, { childList: true, subtree: true });
 
   // Trigger from the extension popup ("Autofill this Easy Apply" / "Autofill this page").
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // Only accept messages from our own extension (popup/background), not page scripts.
+    if (!sender || sender.id !== chrome.runtime.id) return false;
     if (msg && msg.type === 'aplyd-run') {
       A.ensureAgent();
       const adapter = A.pickAdapter(location.href);

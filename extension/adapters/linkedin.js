@@ -75,10 +75,32 @@
       const btns = [...modal.querySelectorAll('button')].filter(isVisible);
       const find = (re) => btns.find((b) => re.test((b.getAttribute('aria-label') || b.innerText || '').trim()));
       return {
-        submit: find(/^submit application/i) || find(/^submit$/i),
+        // Submit/terminal buttons - we NEVER click these; we only detect them to stop.
+        submit: find(/^submit application/i) || find(/^submit$/i) || find(/^done$/i),
         review: find(/review/i),
-        next: find(/continue to next step/i) || find(/^next$/i) || find(/^continue$/i),
+        // Intentionally NO bare /^continue$/i here: on some flows the FINAL step's
+        // button reads "Continue", and clicking it could submit. We only advance via
+        // the unambiguous "Next"/"Continue to next step" labels.
+        next: find(/continue to next step/i) || find(/^next$/i),
       };
+    },
+
+    // Detect the LinkedIn step-progress so the engine knows when it's on the LAST
+    // step and must hand off to the user instead of auto-advancing. Returns
+    // { current, total } when readable, else null. Reads the progress bar's
+    // aria-valuenow/valuemax, or a "Step X of Y" / "X of Y" label.
+    stepProgress(modal) {
+      const root = modal || document;
+      const pb = root.querySelector('[role="progressbar"], progress, .artdeco-completeness-meter-linear__progress-bar, [aria-label*="completion" i]');
+      if (pb) {
+        const now = Number(pb.getAttribute('aria-valuenow'));
+        const max = Number(pb.getAttribute('aria-valuemax'));
+        if (Number.isFinite(now) && Number.isFinite(max) && max > 0) return { current: now, total: max };
+      }
+      const txt = (root.innerText || '');
+      const m = txt.match(/step\s+(\d+)\s+of\s+(\d+)/i) || txt.match(/\b(\d+)\s+of\s+(\d+)\b/);
+      if (m) return { current: Number(m[1]), total: Number(m[2]) };
+      return null;
     },
 
     // stash the current job so an external ATS tab can read it (handoff)

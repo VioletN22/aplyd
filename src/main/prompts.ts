@@ -4,10 +4,35 @@
 import fs from 'fs';
 import http from 'http';
 import https from 'https';
+import dns from 'dns';
 import {
   getAnswerBank, getDocuments, getVoiceNotes, getPortfolioLinks, getSetting,
 } from './database';
 import type { AnswerBankEntry } from '../shared/types';
+
+// SSRF guard: only fetch public http(s) URLs. Blocks loopback/private/link-local
+// (incl. cloud metadata 169.254.169.254) so a crafted portfolio link or a poisoned
+// search result can't make the app read internal/localhost services. Resolves the
+// hostname first so a public name pointing at an internal IP is also caught.
+function isPrivateIp(ip: string): boolean {
+  const a = ip.replace(/^::ffff:/i, '');
+  if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0)/.test(a)) return true;
+  if (a === '::1' || /^fc00:/i.test(a) || /^fd[0-9a-f]{2}:/i.test(a) || /^fe80:/i.test(a)) return true;
+  const m = a.match(/^172\.(\d+)\./); if (m) { const o = +m[1]; if (o >= 16 && o <= 31) return true; }
+  return false;
+}
+function urlAllowed(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let u: URL; try { u = new URL(url); } catch { return resolve(false); }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return resolve(false);
+    const host = u.hostname.replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || isPrivateIp(host)) return resolve(false);
+    dns.lookup(host, { all: true }, (err, addrs) => {
+      if (err || !addrs || !addrs.length) return resolve(false);
+      resolve(!addrs.some((x) => isPrivateIp(x.address)));
+    });
+  });
+}
 
 // The structured profile (identity / work-auth / salary / locations / links),
 // stored as a JSON object in app_settings under 'profile'. Rendered as facts.
@@ -48,14 +73,15 @@ export function resumeText(): string {
 
 // Best-effort fetch of a portfolio page, stripped to text, so Claude can ground
 // a letter in the actual site content. Short timeout; failure is non-fatal.
-export function fetchUrlText(url: string, timeoutMs = 6000): Promise<string> {
+export async function fetchUrlText(url: string, timeoutMs = 6000, depth = 0): Promise<string> {
+  if (depth > 4 || !(await urlAllowed(url))) return '';
   return new Promise((resolve) => {
     try {
       const lib = url.startsWith('https') ? https : http;
       const req = lib.get(url, { headers: { 'User-Agent': 'aplyd' } }, (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
-          fetchUrlText(new URL(res.headers.location, url).toString(), timeoutMs).then(resolve);
+          fetchUrlText(new URL(res.headers.location, url).toString(), timeoutMs, depth + 1).then(resolve);
           return;
         }
         let data = '';
@@ -79,7 +105,8 @@ export function fetchUrlText(url: string, timeoutMs = 6000): Promise<string> {
 
 // Raw fetch (HTML kept) - used to parse search-result links. Browser-like UA so
 // search endpoints don't 403 us. Caps the body and never rejects.
-export function fetchUrlRaw(url: string, timeoutMs = 7000): Promise<string> {
+export async function fetchUrlRaw(url: string, timeoutMs = 7000, depth = 0): Promise<string> {
+  if (depth > 4 || !(await urlAllowed(url))) return '';
   return new Promise((resolve) => {
     try {
       const lib = url.startsWith('https') ? https : http;
@@ -87,7 +114,7 @@ export function fetchUrlRaw(url: string, timeoutMs = 7000): Promise<string> {
       const req = lib.get(url, { headers }, (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
-          fetchUrlRaw(new URL(res.headers.location, url).toString(), timeoutMs).then(resolve);
+          fetchUrlRaw(new URL(res.headers.location, url).toString(), timeoutMs, depth + 1).then(resolve);
           return;
         }
         let data = '';
@@ -253,4 +280,96 @@ export function parseProfileSeed(out: string): Record<string, string> {
     }
   } catch { /* fall through */ }
   return {};
+}
+
+// ── Used by the LinkedIn Easy Apply bridge (the Chrome extension) ─────────────
+
+// Scan up to a few portfolio links so a cover letter can reference real work.
+export async function portfolioSnapshotAll(): Promise<string> {
+  const links = getPortfolioLinks();
+  if (!links.length) return '';
+  const parts: string[] = [];
+  for (const l of links.slice(0, 3)) {
+    const t = await fetchUrlText(l.url);
+    if (t) parts.push(`PORTFOLIO (${l.label}, ${l.url}):\n${t}`);
+  }
+  return parts.join('\n\n');
+}
+
+// Full resume text: reads .txt/.md directly, extracts .pdf via pdf-parse. Gives
+// cover letters and tailored answers real grounding.
+export async function extractResumeText(): Promise<string> {
+  const resume = getDocuments().find((d) => d.isDefault && d.tags.includes('resume'))
+    || getDocuments().find((d) => d.tags.includes('resume'));
+  if (!resume || !fs.existsSync(resume.filePath)) return '';
+  try {
+    if (/\.(txt|md|markdown)$/i.test(resume.filePath)) {
+      return fs.readFileSync(resume.filePath, 'utf-8').slice(0, 9000);
+    }
+    if (/\.pdf$/i.test(resume.filePath)) {
+      const pdfParse = require('pdf-parse') as (b: Buffer) => Promise<{ text: string }>;
+      const data = await pdfParse(fs.readFileSync(resume.filePath));
+      return (data.text || '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 9000);
+    }
+  } catch { /* ignore, fall back to facts block */ }
+  return '';
+}
+
+// Studio mode: draft the letter AND surface up to 2 clarifying questions when the
+// job/company has something important the profile does not cover. Returns JSON.
+export function coverLetterStudioPrompt(opts: { company: string; role: string; jobText?: string; portfolioText?: string; resumeText?: string; extra?: string }): string {
+  return (
+    `Write a cover letter for the user, first person, tailored to THIS role, grounded ONLY in their real experience (resume, portfolio, facts). Invent nothing.\n\n` +
+    `ROLE: ${opts.role}\nCOMPANY: ${opts.company}\n\n` +
+    (opts.jobText ? `JOB POSTING:\n${opts.jobText.slice(0, 4000)}\n\n` : '') +
+    profileBlock(opts) +
+    `3-4 tight paragraphs, specific and genuine, no cliches.\n\n` +
+    `ALSO: if the job or company emphasises something important that the user's profile does NOT clearly cover (a specific tool, domain, or experience worth addressing), include up to 2 short clarifying questions whose answers would make the letter stronger. If nothing is missing, return an empty list.\n\n` +
+    `Respond with ONLY valid JSON: {"letter":"<the cover letter body>","questions":["<question 1>","<question 2>"]}`
+  );
+}
+
+// Resolve a single application-form field from the user's profile/facts, or ask.
+export function resolveFieldPrompt(opts: { label: string; type?: string; options?: string[] }): string {
+  const optionsLine = Array.isArray(opts.options) && opts.options.length
+    ? `It is a ${opts.type || 'choice'} with these options: ${opts.options.join(' | ')}. Your value MUST be exactly one of them.\n` : '';
+  return (
+    `You are filling out a job-application form field on the user's behalf.\n` +
+    `Field label: "${opts.label}"\nField type: ${opts.type || 'text'}\n${optionsLine}` +
+    `Profile:\n${structuredProfileBlock()}\nKnown facts about the user:\n${factsBlock()}\nPortfolio:\n${portfolioBlock()}\n\n` +
+    `NAME HANDLING (important): the profile may list separate "Legal first name", "Legal last name", and "Preferred name".\n` +
+    `- Use the LEGAL name when the field asks for a legal name, full legal name, government/official name, real name, name as it appears on your passport/ID, OR a plain "First name"/"Given name"/"Last name"/"Surname"/"Full name" on an application form. For a single full-name field, combine legal first + legal last.\n` +
+    `- Use the PREFERRED name only when the field explicitly asks for a preferred name, display name, nickname, "name you go by", or "what should we call you".\n` +
+    `- When unsure on a job application, default to the legal name.\n\n` +
+    `If you can confidently fill this from the known facts (or it's a standard field like a yes/no work-authorization the facts answer), respond ONLY with JSON: {"action":"fill","value":"..."}.\n` +
+    `If filling it would require personal info NOT present in the facts, respond ONLY with JSON: {"action":"ask","hint":"<one-line plain description of what's being asked>"}.`
+  );
+}
+
+// Tailor an open-ended application answer to the role, in the user's voice.
+export function tailorAnswerPrompt(opts: { question: string; jobText?: string }): string {
+  const { likes, avoid } = voiceBlocks();
+  const resume = resumeText();
+  return (
+    `Write the user's answer to a job-application question, first person, tailored to THIS role and grounded only in the user's real experience (don't invent facts).\n\n` +
+    `QUESTION:\n${opts.question}\n\n` +
+    (opts.jobText ? `JOB POSTING (for tailoring):\n${String(opts.jobText).slice(0, 4000)}\n\n` : '') +
+    (resume ? `USER RESUME:\n${resume}\n\n` : '') +
+    `PORTFOLIO:\n${portfolioBlock()}\n\nKNOWN FACTS:\n${factsBlock()}\n\n` +
+    `WRITING STYLE TO FOLLOW:\n${likes}\nAVOID:\n${avoid}\n\n` +
+    `Be concise and specific. No corporate fluff. Respond with ONLY the answer text, no preamble or quotes.`
+  );
+}
+
+// Parse the resolve-field JSON into a fill/ask action.
+export function parseFieldAction(out: string): { action: 'fill' | 'ask'; value?: string; hint?: string } {
+  try {
+    const m = (out || '').match(/\{[\s\S]*\}/);
+    if (m) {
+      const j = JSON.parse(m[0]);
+      if (j.action === 'fill' && typeof j.value === 'string') return { action: 'fill', value: j.value };
+      if (j.action === 'ask') return { action: 'ask', hint: String(j.hint || '') };
+    }
+  } catch { /* fall through */ }
+  return { action: 'ask', hint: '' };
 }

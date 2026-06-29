@@ -66,7 +66,7 @@ export const SettingsPage: React.FC = () => {
       setLoading(true);
       setError(null);
       const data = await window.electronAPI.db.getAllWorkflows();
-      setWorkflows(data);
+      setWorkflows(data ?? []);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load workflows';
       setError(message);

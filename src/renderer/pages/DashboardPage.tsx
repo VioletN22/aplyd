@@ -104,8 +104,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     (a, b) => (STAGE_RANK[a[0]] ?? 99) - (STAGE_RANK[b[0]] ?? 99)
   );
   const maxStage = Math.max(1, ...sortedStages.map(([, c]) => c));
-  const hasTransitions = !!flow && flow.links.length > 0;
-  const offers = flow?.summary.offers ?? 0;
+  const hasTransitions = !!flow && (flow.links ?? []).length > 0;
+  const offers = flow?.summary?.offers ?? 0;
 
   return (
     <div style={{ padding: '32px', maxWidth: '1040px', margin: '0 auto' }}>

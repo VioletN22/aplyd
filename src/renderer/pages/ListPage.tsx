@@ -27,7 +27,7 @@ export const ListPage: React.FC<ListPageProps> = ({ onSelectApplication }) => {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
 
   useEffect(() => {
-    window.electronAPI.db.getAllWorkflows().then(setWorkflows).catch(() => {});
+    window.electronAPI.db.getAllWorkflows().then((data: Workflow[] | null) => setWorkflows(data ?? [])).catch(() => {});
   }, []);
 
   // The stages a given application can be set to: its workflow path + outcomes,

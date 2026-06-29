@@ -422,8 +422,13 @@ export function updateWorkflow(
  */
 export function deleteWorkflow(id: string): void {
   const database = getDatabase();
-  const stmt = database.prepare('DELETE FROM workflows WHERE id = ?');
-  stmt.run(id);
+  // Don't orphan applications: refuse to delete a workflow still in use (the FK
+  // would otherwise throw a raw SQLITE_CONSTRAINT). Surface a clear message instead.
+  const inUse = (database.prepare('SELECT COUNT(*) AS n FROM applications WHERE workflow_id = ?').get(id) as { n: number }).n;
+  if (inUse > 0) {
+    throw new Error(`This workflow is used by ${inUse} application${inUse === 1 ? '' : 's'}. Move or delete them first.`);
+  }
+  database.prepare('DELETE FROM workflows WHERE id = ?').run(id);
 }
 
 // Application CRUD operations

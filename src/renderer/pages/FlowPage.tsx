@@ -66,9 +66,9 @@ export const FlowPage: React.FC = () => {
     );
   }
 
-  const { summary } = data;
+  const summary = data.summary ?? { total: 0, offers: 0, rejected: 0, withdrawn: 0, inProgress: 0 };
   const hasApps = summary.total > 0;
-  const hasTransitions = data.links.length > 0;
+  const hasTransitions = (data.links ?? []).length > 0;
 
   return (
     <div style={{ padding: '32px', maxWidth: '1040px', margin: '0 auto' }}>

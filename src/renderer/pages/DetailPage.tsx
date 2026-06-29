@@ -50,7 +50,7 @@ export const DetailPage: React.FC<DetailPageProps> = ({ applicationId, onBack })
       }
       setApplication(app);
 
-      const workflows = await window.electronAPI.db.getAllWorkflows();
+      const workflows = (await window.electronAPI.db.getAllWorkflows()) ?? [];
       const wf = workflows.find((w: Workflow) => w.id === app.workflow_id) || null;
       setWorkflow(wf);
 

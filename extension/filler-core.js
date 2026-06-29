@@ -71,7 +71,16 @@
     if (!raw) raw = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || '';
     return cleanLabel(raw);
   }
-  function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  // Full HTML escaper - safe in BOTH text and quoted-attribute contexts (escapes
+  // &, <, >, " and '). Used for every interpolated page/profile/AI string.
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
   // The text of a SINGLE choice option (a radio/checkbox), e.g. "Yes"/"No" - not
   // the group question. Prefer the option's own label over the group legend.
@@ -382,7 +391,23 @@
           setStatus(`Filling “${(f.label || f.kind).slice(0, 46)}”`);
 
           if (f.kind === 'file') { if (await uploadDefaultDoc(f)) { filled++; tick(); } continue; }
-          if (f.kind === 'checkbox') { if (/agree|terms|consent|certify|privacy/i.test(f.label)) { f.el.click(); filled++; tick(); } continue; }
+          if (f.kind === 'checkbox') {
+            // Legal attestations are surfaced for EXPLICIT user confirmation - we never
+            // silently auto-tick them. "certify" is intentionally excluded entirely: a
+            // false certification is the user's to make, not the engine's.
+            if (/\bcertify\b/i.test(f.label)) {
+              setStatus('Attestation - your call…');
+              const a = await askUser(f.label, 'Legal attestation - tick only if true', ['Yes, tick this', 'No, leave it']);
+              if (a && a.value === 'Yes, tick this' && !f.el.checked) { f.el.click(); filled++; tick(); }
+              continue;
+            }
+            if (/agree|terms|consent|privacy/i.test(f.label)) {
+              setStatus('Attestation - your call…');
+              const a = await askUser(f.label, 'Please confirm before I tick this', ['Yes, tick this', 'No, leave it']);
+              if (a && a.value === 'Yes, tick this' && !f.el.checked) { f.el.click(); filled++; tick(); }
+            }
+            continue;
+          }
           if (f.kind === 'textarea') {
             // cover letters open the interactive studio instead of a silent autofill
             if (/cover letter|covering letter|cover note/i.test(f.label) && window.Aplyd.openCoverStudio) {
@@ -418,13 +443,44 @@
         }
         await sleep(400);
         const { submit, review, next } = adapter.footerButtons(root) || {};
+        // INVARIANT: we only ever advance INTERMEDIATE steps; the human submits.
+        // We NEVER programmatically .click() a submit/done/terminal button.
         if (submit) {
+          // passive listener only - so we can log when the USER submits. No .click().
           submit.addEventListener('click', () => logOnce(ctx), { once: true });
-          setStatus('Ready - review, then hit Submit.', false, true);
+          setStatus('Review, then hit Submit yourself.', false, true);
           break;
         }
-        if (review) { review.click(); await sleep(1200); continue; }
-        if (next) { next.click(); await sleep(1200); continue; }
+        // Structural last-step guard: if the site exposes step progress and this is
+        // the final step, STOP and hand off - never auto-click a terminal button
+        // that might submit (e.g. a "Continue"/"Review" labelled final action).
+        const prog = adapter.stepProgress ? adapter.stepProgress(root) : null;
+        const isLastStep = prog && prog.total > 0 && prog.current >= prog.total;
+        if (isLastStep) {
+          setStatus('Last step - review, then submit yourself.', false, true);
+          break;
+        }
+        const advance = review || next;
+        if (advance) {
+          // Guard the label one more time: never click anything that reads like a
+          // final/submit action, even if an adapter's matcher let it through.
+          const adv = (advance.getAttribute('aria-label') || advance.innerText || '').trim();
+          if (/\b(submit|done|apply|finish)\b/i.test(adv)) {
+            setStatus('Looks like the final step - review, then submit yourself.', false, true);
+            break;
+          }
+          advance.click();
+          await sleep(1200);
+          // Re-scan after the DOM settles: if a Submit-type button is now present,
+          // we've reached the final step - STOP rather than loop further.
+          const after = adapter.footerButtons(adapter.getFormRoot() || root) || {};
+          if (after.submit) {
+            after.submit.addEventListener('click', () => logOnce(ctx), { once: true });
+            setStatus('Review, then hit Submit yourself.', false, true);
+            break;
+          }
+          continue;
+        }
         setStatus('Filled what I could - finish the rest by hand.', false, true);
         break;
       }
@@ -464,11 +520,30 @@
     if (g) { setAdapter(g); runFill(g); }
   }
 
+  // Hosts we trust to consume the cross-tab `autorun` handoff automatically. Kept in
+  // sync with manifest.json content_scripts.matches. On ANY other origin (including
+  // anything the catch-all generic adapter would match), the user must click Autofill
+  // manually - we never auto-run on an unknown destination origin.
+  const AUTORUN_HOSTS = [
+    /(^|\.)linkedin\.com$/i,
+    /(^|\.)greenhouse\.io$/i,
+    /(^|\.)lever\.co$/i,
+    /(^|\.)myworkdayjobs\.com$/i,
+    /(^|\.)ashbyhq\.com$/i,
+  ];
+  function isAutorunHost() {
+    const h = location.hostname || '';
+    return AUTORUN_HOSTS.some((re) => re.test(h));
+  }
+
   // On an external ATS tab opened from a LinkedIn Apply, the stash carries an
   // `autorun` flag - consume it once and continue the flow automatically.
   let autorunChecked = false;
   async function maybeAutorun(adapter) {
     if (autorunChecked || !adapter || adapter.id === 'linkedin') return;
+    // Only honour the handoff on a KNOWN supported ATS host. The generic adapter
+    // matches everything, so guard by origin too - never auto-run on an unknown site.
+    if (adapter.id === 'generic' || !isAutorunHost()) { autorunChecked = true; return; }
     autorunChecked = true;
     const { ok, data } = await call('/pending-job', 'GET');
     if (ok && data && data.job && data.job.autorun) {

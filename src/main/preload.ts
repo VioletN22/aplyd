@@ -43,13 +43,6 @@ const electronAPI = {
     getData: () => ipcRenderer.invoke('flow:getData'),
   },
 
-  // purpl hq license
-  license: {
-    status: () => ipcRenderer.invoke('license:status'),
-    activate: (key: string) => ipcRenderer.invoke('license:activate', key),
-    deactivate: () => ipcRenderer.invoke('license:deactivate'),
-  },
-
   // Per-application chat assistant
   chat: {
     getMessages: (applicationId: string) => ipcRenderer.invoke('chat:getMessages', applicationId),
@@ -123,16 +116,6 @@ const electronAPI = {
   // Quick add operation
   quickAddApplication: (company: string, jobTitle: string, jobSource?: string | null) =>
     ipcRenderer.invoke('quickAddApplication', company, jobTitle, jobSource ?? null),
-
-  // Attachment operations
-  attachment: {
-    add: (applicationId: string, filePath: string) =>
-      ipcRenderer.invoke('attachment:add', applicationId, filePath),
-    getAll: (applicationId: string) =>
-      ipcRenderer.invoke('attachment:getAll', applicationId),
-    delete: (attachmentId: string) =>
-      ipcRenderer.invoke('attachment:delete', attachmentId),
-  },
 
   // Legacy shortcuts for backwards compatibility
   getAllApplications: (filters?: any) => ipcRenderer.invoke('db:getAllApplications', filters),
