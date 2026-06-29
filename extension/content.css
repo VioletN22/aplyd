@@ -1,0 +1,177 @@
+/* aplyd - injected UI. Namespaced to avoid clashing with LinkedIn. */
+#aplyd-agent {
+  position: fixed; bottom: 22px; right: 22px; z-index: 2147483646;
+  width: 296px; box-sizing: border-box; padding: 14px;
+  background: #161513; border: 1px solid rgba(255,255,255,.08); border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #f3f1ec;
+  animation: aplyd-rise .22s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes aplyd-rise { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+
+/* header */
+#aplyd-agent .aplyd-head { display: flex; align-items: center; gap: 10px; }
+#aplyd-agent .aplyd-mark {
+  width: 30px; height: 30px; border-radius: 9px; overflow: hidden; flex-shrink: 0;
+  background: #0d0c0b;
+}
+#aplyd-agent .aplyd-mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#aplyd-agent .aplyd-titles { flex: 1; min-width: 0; line-height: 1.2; }
+#aplyd-agent .aplyd-name { font-size: 14px; font-weight: 700; }
+#aplyd-agent .aplyd-sub { font-size: 11px; color: #8a8780; }
+#aplyd-agent .aplyd-conn { width: 8px; height: 8px; border-radius: 50%; background: #2ecf6f; box-shadow: 0 0 0 3px rgba(46,207,111,.18); flex-shrink: 0; }
+#aplyd-agent .aplyd-min {
+  width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0; margin-left: 2px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  background: transparent; border: none; color: #8a8780; transition: background .12s ease, color .12s ease;
+}
+#aplyd-agent .aplyd-min:hover { background: rgba(255,255,255,.08); color: #f3f1ec; }
+
+/* collapsed: shrink to just the app icon */
+#aplyd-agent .aplyd-mini { display: none; width: 100%; height: 100%; object-fit: cover; border-radius: 16px; }
+#aplyd-agent.collapsed {
+  width: 50px; height: 50px; padding: 0; border-radius: 16px; cursor: pointer; overflow: visible;
+}
+#aplyd-agent.collapsed > :not(.aplyd-mini) { display: none; }
+#aplyd-agent.collapsed .aplyd-mini { display: block; }
+#aplyd-agent.collapsed:hover { transform: translateY(-1px); }
+/* state badge on the collapsed icon so you can tell what it's doing at a glance */
+#aplyd-agent.collapsed::after {
+  content: ''; position: absolute; top: -3px; right: -3px; width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid #161513; background: #56534d;
+}
+#aplyd-agent.collapsed.running::after { background: #f23a17; animation: aplyd-pulse 1s ease-in-out infinite; }
+#aplyd-agent.collapsed.ready::after { background: #2ecf6f; }
+#aplyd-agent.collapsed.error::after { background: #ff5a4d; }
+@keyframes aplyd-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(242,58,23,.5); } 50% { box-shadow: 0 0 0 5px rgba(242,58,23,0); } }
+
+/* status body */
+#aplyd-agent .aplyd-body {
+  display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 12px;
+  background: rgba(255,255,255,.04); border-radius: 12px; border: 1px solid rgba(255,255,255,.05);
+}
+#aplyd-agent .aplyd-lines { min-width: 0; flex: 1; }
+#aplyd-agent .aplyd-status-text { font-size: 12.5px; font-weight: 600; color: #f3f1ec; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#aplyd-agent .aplyd-meta { font-size: 11px; color: #8a8780; margin-top: 2px; }
+#aplyd-agent .aplyd-meta:empty { display: none; }
+
+/* spinner - visible only while running */
+#aplyd-agent .aplyd-spin {
+  width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid rgba(255,255,255,.18); border-top-color: #f23a17;
+  animation: aplyd-spin .7s linear infinite; display: none;
+}
+@keyframes aplyd-spin { to { transform: rotate(360deg); } }
+/* status dot for non-running states (drawn on the spinner slot) */
+#aplyd-agent .aplyd-body::before {
+  content: ''; width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; display: none;
+  background: #8a8780; order: -1;
+}
+#aplyd-agent.idle .aplyd-body::before { display: block; background: #56534d; }
+#aplyd-agent.ready .aplyd-body::before { display: block; background: #2ecf6f; box-shadow: 0 0 0 4px rgba(46,207,111,.15); }
+#aplyd-agent.error .aplyd-body::before { display: block; background: #ff5a4d; box-shadow: 0 0 0 4px rgba(255,90,77,.15); }
+#aplyd-agent.running .aplyd-spin { display: block; }
+
+/* actions */
+#aplyd-agent .aplyd-actions { margin-top: 12px; }
+#aplyd-agent .aplyd-cta, #aplyd-agent .aplyd-stop {
+  width: 100%; padding: 11px; border: none; border-radius: 11px; cursor: pointer;
+  font-size: 13.5px; font-weight: 700; font-family: inherit; transition: filter .12s ease, transform .12s ease;
+}
+#aplyd-agent .aplyd-cta { background: #f23a17; color: #fff; }
+#aplyd-agent .aplyd-cta:hover { filter: brightness(1.08); transform: translateY(-1px); }
+#aplyd-agent .aplyd-stop { background: rgba(255,255,255,.08); color: #d6d3cc; }
+#aplyd-agent .aplyd-stop:hover { background: rgba(255,90,77,.16); color: #ff7a6f; }
+
+/* which action shows per state */
+#aplyd-agent .aplyd-stop { display: none; }
+#aplyd-agent.running .aplyd-cta { display: none; }
+#aplyd-agent.running .aplyd-stop { display: block; }
+#aplyd-agent.ready .aplyd-cta { background: rgba(255,255,255,.1); color: #f3f1ec; }
+
+.aplyd-ask-overlay {
+  position: fixed; inset: 0; z-index: 2147483647;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(17,17,16,.45); backdrop-filter: blur(4px);
+}
+.aplyd-ask-card {
+  width: 380px; max-width: 90vw; padding: 22px; border-radius: 16px;
+  background: #fff; color: #111110; box-shadow: 0 24px 60px rgba(0,0,0,.35);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.aplyd-ask-brand { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #f23a17; margin-bottom: 12px; }
+.aplyd-ask-q { font-size: 16px; font-weight: 600; line-height: 1.3; margin-bottom: 4px; }
+.aplyd-ask-hint { font-size: 13px; color: #6b6b66; margin-bottom: 14px; }
+.aplyd-ask-input {
+  width: 100%; box-sizing: border-box; padding: 11px 13px; margin-top: 8px;
+  border: 1px solid #e2e1dc; border-radius: 10px; font-size: 14px; outline: none;
+}
+.aplyd-ask-input:focus { border-color: #f23a17; }
+.aplyd-ask-choices { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.aplyd-ask-choice {
+  text-align: left; padding: 11px 14px; border: 1px solid #e2e1dc; border-radius: 10px;
+  background: #faf9f6; color: #111110; font-size: 14px; font-weight: 600; cursor: pointer; transition: all .12s ease;
+}
+.aplyd-ask-choice:hover { border-color: #f23a17; background: #fff; transform: translateY(-1px); }
+.aplyd-ask-remember { display: flex; align-items: center; gap: 7px; margin: 12px 0 16px; font-size: 12px; color: #6b6b66; }
+.aplyd-ask-row { display: flex; gap: 10px; justify-content: flex-end; }
+.aplyd-ask-row button { padding: 9px 16px; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; }
+.aplyd-ask-skip { background: #f3f2ee; color: #6b6b66; }
+.aplyd-ask-save { background: #f23a17; color: #fff; }
+
+/* ── Cover-letter studio ─────────────────────────────────────────────────── */
+.aplyd-cl-overlay {
+  position: fixed; inset: 0; z-index: 2147483647;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(17,17,16,.5); backdrop-filter: blur(5px);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.aplyd-cl-card {
+  width: 720px; max-width: 94vw; max-height: 88vh; display: flex; flex-direction: column;
+  background: #fff; color: #111110; border-radius: 18px; box-shadow: 0 30px 80px rgba(0,0,0,.4);
+  position: relative; overflow: hidden;
+}
+.aplyd-cl-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid #f0efea; }
+.aplyd-cl-brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 15px; flex: 1; }
+.aplyd-cl-brand img { width: 24px; height: 24px; border-radius: 6px; }
+.aplyd-cl-brand span { font-weight: 500; color: #9a9a93; font-size: 13px; }
+.aplyd-cl-x { background: transparent; border: none; font-size: 24px; line-height: 1; color: #9a9a93; cursor: pointer; padding: 0 4px; }
+.aplyd-cl-x:hover { color: #111110; }
+
+.aplyd-cl-body {
+  flex: 1; overflow-y: auto; padding: 22px 24px; font-family: Georgia, 'Times New Roman', serif;
+  font-size: 15px; line-height: 1.7; color: #1a1a18; min-height: 220px;
+}
+.aplyd-cl-para { margin: 0 0 15px; }
+.aplyd-cl-sent { transition: background-color .5s ease, color .4s ease, opacity .5s ease; border-radius: 3px; }
+.aplyd-cl-removing { background: rgba(220,38,38,.16); color: #b42318; text-decoration: line-through; opacity: .55; }
+.aplyd-cl-adding { background: rgba(6,118,71,.18); box-shadow: 0 0 0 2px rgba(6,118,71,.12); }
+.aplyd-cl-adding.aplyd-cl-settle { background: rgba(6,118,71,0); box-shadow: none; }
+.aplyd-cl-loading { color: #9a9a93; font-family: -apple-system, sans-serif; font-size: 14px; display: flex; align-items: center; gap: 10px; padding: 30px 0; }
+.aplyd-cl-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(0,0,0,.15); border-top-color: #f23a17; animation: aplyd-spin .7s linear infinite; }
+
+.aplyd-cl-questions:empty { display: none; }
+.aplyd-cl-qbox { margin: 0 24px 14px; padding: 13px 15px; background: #faf7f2; border: 1px solid #efe9df; border-radius: 12px; font-family: -apple-system, sans-serif; }
+.aplyd-cl-qhint { font-size: 12px; font-weight: 600; color: #8a6d3b; margin-bottom: 10px; }
+.aplyd-cl-qrow { margin-bottom: 9px; }
+.aplyd-cl-q { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.aplyd-cl-qinput { width: 100%; box-sizing: border-box; padding: 8px 11px; border: 1px solid #e2e1dc; border-radius: 8px; font-size: 13px; }
+.aplyd-cl-qbtn { margin-top: 4px; padding: 8px 14px; border: none; border-radius: 9px; background: #111110; color: #fff; font-weight: 600; font-size: 12px; cursor: pointer; }
+
+.aplyd-cl-refine { display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid #f0efea; }
+.aplyd-cl-input { flex: 1; padding: 11px 14px; border: 1px solid #e2e1dc; border-radius: 11px; font-size: 14px; outline: none; }
+.aplyd-cl-input:focus { border-color: #f23a17; }
+.aplyd-cl-send { padding: 11px 18px; border: none; border-radius: 11px; background: #111110; color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; }
+.aplyd-cl-send:disabled { opacity: .5; cursor: default; }
+
+.aplyd-cl-foot { display: flex; align-items: center; gap: 12px; padding: 12px 20px 16px; }
+.aplyd-cl-remember { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b6b66; font-family: -apple-system, sans-serif; }
+.aplyd-cl-actions { margin-left: auto; display: flex; gap: 9px; }
+.aplyd-cl-actions button { padding: 10px 16px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; border: none; font-family: -apple-system, sans-serif; }
+.aplyd-cl-cancel { background: #f3f2ee; color: #6b6b66; }
+.aplyd-cl-save { background: #f3f2ee; color: #111110; }
+.aplyd-cl-save:disabled, .aplyd-cl-use:disabled { opacity: .5; cursor: default; }
+.aplyd-cl-use { background: #f23a17; color: #fff; }
+.aplyd-cl-toast { position: absolute; bottom: 14px; left: 20px; font-size: 12px; font-family: -apple-system, sans-serif; color: #067647; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 60%; }
+.aplyd-cl-toast.show { opacity: 1; }
+.aplyd-cl-toast.err { color: #b42318; }
