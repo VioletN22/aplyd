@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect width="1024" height="1024" fill="#111010"/>
+  <text x="512" y="560"
+    font-family="-apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif"
+    font-weight="300" font-size="220" letter-spacing="-8"
+    text-anchor="middle" dominant-baseline="middle"
+  ><tspan fill="#f0ede8">aply</tspan><tspan fill="#f23a17">d</tspan></text>
+</svg>

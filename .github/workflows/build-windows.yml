@@ -1,0 +1,58 @@
+name: Build Windows
+
+# Manual trigger: GitHub -> Actions -> "Build Windows" -> Run workflow.
+# Builds aplyd on a real Windows runner (it compiles the native SQLite module there)
+# and uploads a downloadable installer plus the Chrome extension.
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Compile (renderer + main)
+        run: npm run build
+
+      - name: Package Windows app
+        run: npx electron-builder --config electron-builder.win.js --win --x64 --publish never
+
+      - name: Smoke test the built app
+        shell: pwsh
+        run: |
+          $exe = "release\win-unpacked\aplyd.exe"
+          if (!(Test-Path $exe)) { Write-Error "built exe not found: $exe"; exit 1 }
+          $env:APLYD_SMOKETEST = "1"
+          Write-Host "Booting $exe (loads the native DB module and runs a query)..."
+          $p = Start-Process -FilePath $exe -PassThru
+          if (!$p.WaitForExit(60000)) { $p.Kill(); Write-Error "app did not exit within 60s (hung on boot)"; exit 1 }
+          Write-Host "exit code: $($p.ExitCode)"
+          $log = Join-Path $env:TEMP "aplyd-main.log"
+          if (Test-Path $log) { Write-Host "---- last log lines ----"; Get-Content $log -Tail 8 }
+          if ($p.ExitCode -ne 0) { Write-Error "smoke test failed (app crashed on boot)"; exit 1 }
+          Write-Host "Smoke test passed."
+
+      - name: Stage artifacts (exe + extension)
+        shell: bash
+        run: |
+          mkdir -p out
+          cp release/*.exe out/ 2>/dev/null || true
+          cp -r extension out/aplyd-chrome-extension
+          ls -la out
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: aplyd-windows
+          path: out
+          if-no-files-found: error

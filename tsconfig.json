@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "ignoreDeprecations": "6.0",
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020"],
+    "module": "CommonJS",
+    "skipLibCheck": true,
+
+    /* Output */
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+
+    /* Type checking */
+    "isolatedModules": true,
+    "strict": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src/main/**/*", "src/shared/**/*"],
+  "exclude": ["src/renderer/**/*", "node_modules"]
+}
