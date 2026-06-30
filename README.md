@@ -26,9 +26,11 @@ form. aplyd is what I made to stop doing that.
 
 ## How it works
 
+- **Free, and runs on your own Claude.** It is open source and I charge nothing for it. The
+  AI features use your own Claude login, so the only thing you need is a Claude account you
+  already have.
 - Electron, React, and TypeScript on the front, with a local SQLite database underneath.
-- Cover letters and job-listing parsing run through the Claude CLI using your own Claude
-  subscription, so there is no API key to manage.
+- Cover letters and job-listing parsing go through the Claude CLI on your own Claude login.
 - A companion Chrome extension reads your saved profile and fills Easy Apply fields.
 - Built and signed for macOS. A Windows build is wired up through GitHub Actions.
 
@@ -48,16 +50,27 @@ The LinkedIn Easy Apply setup the Chrome extension fills from:
 
 ![Easy Apply setup](docs/images/setup.png)
 
-## Running it
+## Setup
 
-You need Node, and the Claude CLI signed in (`claude login`) for the cover-letter and
-parsing features.
+aplyd is free and open source. It uses your own Claude login for the AI features (a
+Claude.ai subscription or a signed-in Claude CLI both work). Your data stays on your machine.
 
-```bash
-npm install
-npm run dev          # run in development
-npm run install-app  # build and install to /Applications (macOS)
-```
+1. **Sign in to Claude once.** Install Node and the Claude CLI, then run `claude login`.
+   That is what the cover-letter and job-parsing features use. It is free and needs no API key.
+
+2. **Build and install the app:**
+
+   ```bash
+   npm install
+   npm run install-app   # builds and installs to /Applications (macOS)
+   ```
+
+   Or `npm run dev` to run it from source while developing.
+
+3. **Add the Chrome extension** (only needed for LinkedIn Easy Apply). Open
+   `chrome://extensions`, turn on Developer mode, click **Load unpacked**, and pick the
+   `extension/` folder in this repo. Keep aplyd running so the extension can read your
+   saved profile.
 
 ## Notes
 
